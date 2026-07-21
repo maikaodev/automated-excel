@@ -262,9 +262,6 @@ Design goals:
 - Multiple report templates
 - Batch report generation
 - Template manager
-- User authentication
-- Report history
-- Cloud storage integration
 
 ---
 
