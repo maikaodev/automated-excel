@@ -1,4 +1,5 @@
-import { useState, useRef, ChangeEvent, DragEvent } from 'react';
+import { useState, useRef } from 'react';
+import type { ChangeEvent, DragEvent } from 'react';
 import ExcelJS from 'exceljs';
 import './App.css';
 
@@ -12,8 +13,6 @@ function App() {
   const [sipra, setSipra] = useState('');
   const [endereco, setEndereco] = useState('São José do Capricho, em Flexeiras/AL');
   const [fotos, setFotos] = useState<File[]>([]);
-
-  // NOVO ESTADO: Assinatura do Titular
   const [assinatura, setAssinatura] = useState<File | null>(null);
 
   const [isGenerating, setIsGenerating] = useState(false);
@@ -118,52 +117,69 @@ function App() {
       wsDados.getCell('F7').value = endereco;
       wsDados.getCell('AA7').value = sipra;
       wsDados.getCell('D9').value = pessoas[0].nome;
-      // ✨ CORREÇÃO: Inserir o CPF já formatado com máscara
       wsDados.getCell('Z9').value = formatarCPF(pessoas[0].cpf);
       wsDados.getCell('D11').value = pessoas[1]?.nome || '';
       wsDados.getCell('Z11').value = pessoas[1]?.cpf ? formatarCPF(pessoas[1].cpf) : '';
 
-      // ABA "4.Reg. Fotografico" (Grid 4x2)
+      // ABA "4.Reg. Fotografico" - Distribuição automática
       const wsFotos = workbook.getWorksheet('4.Reg. Fotografico');
       if (!wsFotos) throw new Error('Aba "4.Reg. Fotografico" não encontrada.');
 
-      const LARGURA_IMG = 6;
-      const ALTURA_IMG = 6;
-      const MAX_POR_LINHA = 4;
+      // CÁLCULOS AUTOMÁTICOS DE GRADE
+      const startCol = 1;
+      const startRow = 12;
+      const totalCols = 34;
+      const totalRows = 36;
 
-      for (let i = 0; i < fotos.length; i++) {
+      const numFotos = fotos.length;
+      const maxColsPerRow = 4;
+      const numRowsGrid = Math.ceil(numFotos / maxColsPerRow);
+
+      const imgWidth = Math.floor((totalCols - (maxColsPerRow - 1)) / maxColsPerRow);
+      const imgHeight = Math.floor((totalRows - (numRowsGrid - 1)) / numRowsGrid);
+
+      // Função auxiliar para corrigir o erro de extensão de imagem do TS
+      const getValidExt = (fileName: string): 'jpeg' | 'png' | 'gif' => {
+        const ext = fileName.split('.').pop()?.toLowerCase() || '';
+        if (ext === 'jpg') return 'jpeg';
+        if (ext === 'png') return 'png';
+        if (ext === 'gif') return 'gif';
+        return 'jpeg'; // Fallback seguro
+      };
+
+      for (let i = 0; i < numFotos; i++) {
         const foto = fotos[i];
         const fotoBuffer = await foto.arrayBuffer();
 
         const imageId = workbook.addImage({
           buffer: fotoBuffer,
-          extension: foto.name.split('.').pop() || 'jpg',
+          extension: getValidExt(foto.name),
         });
 
-        const colIndex = 1 + (i % MAX_POR_LINHA) * (LARGURA_IMG + 1);
-        const rowIndex = 12 + Math.floor(i / MAX_POR_LINHA) * (ALTURA_IMG + 1);
+        const colIndex = startCol + (i % maxColsPerRow) * (imgWidth + 1);
+        const rowIndex = startRow + Math.floor(i / maxColsPerRow) * (imgHeight + 1);
 
+        // ADICIONADO "as any" PARA CORRIGIR O ERRO DE TIPAGEM DO EXCELJS
         wsFotos.addImage(imageId, {
-          tl: { col: colIndex, row: rowIndex },
-          br: { col: colIndex + LARGURA_IMG, row: rowIndex + ALTURA_IMG },
+          tl: { col: colIndex, row: rowIndex } as any,
+          br: { col: colIndex + imgWidth, row: rowIndex + imgHeight } as any,
         });
       }
 
-      // ✨ NOVO: ABA "1. Proposta" - Inserir assinatura em D46
+      // ABA "1. Proposta" - Inserir assinatura em D46
       if (assinatura) {
         const wsProposta = workbook.getWorksheet('1. Proposta');
         if (wsProposta) {
           const sigBuffer = await assinatura.arrayBuffer();
           const imageId = workbook.addImage({
             buffer: sigBuffer,
-            extension: assinatura.name.split('.').pop() || 'png',
+            extension: getValidExt(assinatura.name),
           });
 
-          // D46 no Excel: Coluna D = índice 3, Linha 46 = índice 45
-          // Tamanho: Ocupa colunas D até G (largura) e linhas 46 até 51 (altura)
+          // ADICIONADO "as any" PARA CORRIGIR O ERRO DE TIPAGEM DO EXCELJS
           wsProposta.addImage(imageId, {
-            tl: { col: 3, row: 45 },
-            br: { col: 7, row: 51 },
+            tl: { col: 3, row: 45 } as any,
+            br: { col: 7, row: 51 } as any,
           });
         }
       }
@@ -176,7 +192,6 @@ function App() {
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
 
-      // Nome do arquivo
       const currentYear = new Date().getFullYear();
       let nomeBase = pessoas[0].nome.trim();
       if (pessoas.length > 1 && pessoas[1].nome.trim() !== '') {
@@ -187,13 +202,12 @@ function App() {
 
       setSuccessMessage('✅ Planilha gerada com sucesso!');
 
-      // Limpeza do formulário (incluindo a assinatura)
       setTimeout(() => {
         setPessoas([{ nome: '', cpf: '' }]);
         setSipra('');
         setEndereco('São José do Capricho, em Flexeiras/AL');
         setFotos([]);
-        setAssinatura(null); // Limpa a assinatura
+        setAssinatura(null);
         setIsGenerating(false);
         setTimeout(() => setSuccessMessage(null), 3000);
       }, 1000);
@@ -236,7 +250,6 @@ function App() {
         </div>
       )}
 
-      {/* Header */}
       <header className="header">
         <div className="header-left">
           <div className="header-icon">📄</div>
@@ -260,7 +273,6 @@ function App() {
             </div>
           </div>
 
-          {/* Pessoas */}
           {pessoas.map((pessoa, index) => (
             <div key={index} style={{ borderTop: '1px solid #e2e8f0', paddingTop: '1rem', marginTop: '1rem' }}>
               <div className="section-title" style={{ color: '#1a202c' }}>
@@ -294,7 +306,7 @@ function App() {
             </button>
           )}
 
-          {/* ✨ NOVO: Upload da Assinatura (Apenas Titular) */}
+          {/* Upload da Assinatura (Apenas Titular) */}
           <div style={{ marginTop: '1.5rem', borderTop: '1px solid #e2e8f0', paddingTop: '1rem' }}>
             <div className="section-title" style={{ color: '#1a202c' }}>
               ✍️ Assinatura do Titular
@@ -378,7 +390,6 @@ function App() {
         </div>
       </div>
 
-      {/* Botão Gerar */}
       <button className="btn-generate" onClick={onGenerateClick} disabled={isGenerating || isModalOpen}>
         {isGenerating ? 'Gerando...' : 'Gerar Planilha Excel'}
       </button>
