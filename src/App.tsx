@@ -13,11 +13,15 @@ function App() {
   const [endereco, setEndereco] = useState('São José do Capricho, em Flexeiras/AL');
   const [fotos, setFotos] = useState<File[]>([]);
 
+  // NOVO ESTADO: Assinatura do Titular
+  const [assinatura, setAssinatura] = useState<File | null>(null);
+
   const [isGenerating, setIsGenerating] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const signatureInputRef = useRef<HTMLInputElement>(null);
 
   // ================= LÓGICA DE PESSOAS =================
   const adicionarPessoa = () => {
@@ -46,7 +50,6 @@ function App() {
   };
 
   const handleCpfChange = (index: number, value: string) => {
-    // Permite apenas números e limita a 11 dígitos
     const onlyNumbers = value.replace(/\D/g, '');
     if (onlyNumbers.length <= 11) {
       atualizarPessoa(index, 'cpf', onlyNumbers);
@@ -108,16 +111,19 @@ function App() {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(buffer);
 
+      // ABA "0. Dados"
       const wsDados = workbook.getWorksheet('0. Dados');
       if (!wsDados) throw new Error('Aba "0. Dados" não encontrada.');
 
       wsDados.getCell('F7').value = endereco;
       wsDados.getCell('AA7').value = sipra;
       wsDados.getCell('D9').value = pessoas[0].nome;
-      wsDados.getCell('Z9').value = pessoas[0].cpf; // Aqui vai puro: 00823096475
+      // ✨ CORREÇÃO: Inserir o CPF já formatado com máscara
+      wsDados.getCell('Z9').value = formatarCPF(pessoas[0].cpf);
       wsDados.getCell('D11').value = pessoas[1]?.nome || '';
-      wsDados.getCell('Z11').value = pessoas[1]?.cpf || ''; // Aqui vai puro
+      wsDados.getCell('Z11').value = pessoas[1]?.cpf ? formatarCPF(pessoas[1].cpf) : '';
 
+      // ABA "4.Reg. Fotografico" (Grid 4x2)
       const wsFotos = workbook.getWorksheet('4.Reg. Fotografico');
       if (!wsFotos) throw new Error('Aba "4.Reg. Fotografico" não encontrada.');
 
@@ -143,6 +149,26 @@ function App() {
         });
       }
 
+      // ✨ NOVO: ABA "1. Proposta" - Inserir assinatura em D46
+      if (assinatura) {
+        const wsProposta = workbook.getWorksheet('1. Proposta');
+        if (wsProposta) {
+          const sigBuffer = await assinatura.arrayBuffer();
+          const imageId = workbook.addImage({
+            buffer: sigBuffer,
+            extension: assinatura.name.split('.').pop() || 'png',
+          });
+
+          // D46 no Excel: Coluna D = índice 3, Linha 46 = índice 45
+          // Tamanho: Ocupa colunas D até G (largura) e linhas 46 até 51 (altura)
+          wsProposta.addImage(imageId, {
+            tl: { col: 3, row: 45 },
+            br: { col: 7, row: 51 },
+          });
+        }
+      }
+
+      // GERAR E BAIXAR
       const outBuffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([outBuffer], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -150,26 +176,24 @@ function App() {
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
 
-      // ==========================================
-      // 🏷️ LÓGICA DE NOME DO ARQUIVO
-      // ==========================================
+      // Nome do arquivo
       const currentYear = new Date().getFullYear();
       let nomeBase = pessoas[0].nome.trim();
-
       if (pessoas.length > 1 && pessoas[1].nome.trim() !== '') {
         nomeBase += ` - ${pessoas[1].nome.trim()}`;
       }
-
       link.download = `${nomeBase}_${currentYear}.xlsx`;
       link.click();
 
       setSuccessMessage('✅ Planilha gerada com sucesso!');
 
+      // Limpeza do formulário (incluindo a assinatura)
       setTimeout(() => {
         setPessoas([{ nome: '', cpf: '' }]);
         setSipra('');
         setEndereco('São José do Capricho, em Flexeiras/AL');
         setFotos([]);
+        setAssinatura(null); // Limpa a assinatura
         setIsGenerating(false);
         setTimeout(() => setSuccessMessage(null), 3000);
       }, 1000);
@@ -197,11 +221,12 @@ function App() {
           <div className="modal-content">
             <h3>📋 Confirme os dados</h3>
             <p><strong>Nome:</strong> {pessoas[0].nome}</p>
-            <p><strong>CPF:</strong> {pessoas[0].cpf ? formatarCPF(pessoas[0].cpf) : ''}</p>
+            <p><strong>CPF:</strong> {formatarCPF(pessoas[0].cpf)}</p>
             {pessoas[1] && <p><strong>Cônjuge:</strong> {pessoas[1].nome}</p>}
             <p><strong>SIPRA:</strong> {sipra}</p>
             <p><strong>Endereço:</strong> {endereco}</p>
             <p><strong>Total de fotos:</strong> {fotos.length} / 8</p>
+            <p><strong>Assinatura anexada:</strong> {assinatura ? '✅ Sim' : '❌ Não'}</p>
 
             <div className="modal-actions">
               <button className="btn-cancel" onClick={() => setIsModalOpen(false)}>Cancelar</button>
@@ -256,7 +281,6 @@ function App() {
                 <label>CPF</label>
                 <input
                   placeholder="000.000.000-00"
-                  // Exibe o CPF com máscara, mas o estado guarda apenas números
                   value={pessoa.cpf ? formatarCPF(pessoa.cpf) : ''}
                   onChange={(e) => handleCpfChange(index, e.target.value)}
                 />
@@ -269,6 +293,53 @@ function App() {
               + Adicionar Cônjuge
             </button>
           )}
+
+          {/* ✨ NOVO: Upload da Assinatura (Apenas Titular) */}
+          <div style={{ marginTop: '1.5rem', borderTop: '1px solid #e2e8f0', paddingTop: '1rem' }}>
+            <div className="section-title" style={{ color: '#1a202c' }}>
+              ✍️ Assinatura do Titular
+            </div>
+            <div
+              style={{
+                border: '1px dashed #6b46c1',
+                borderRadius: '8px',
+                padding: '1rem',
+                textAlign: 'center',
+                backgroundColor: '#faf5ff',
+                cursor: 'pointer',
+                marginTop: '0.5rem'
+              }}
+              onClick={() => signatureInputRef.current?.click()}
+            >
+              {assinatura ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '1.5rem' }}>✅</span>
+                  <span>{assinatura.name}</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setAssinatura(null); }}
+                    style={{ marginLeft: 'auto', color: 'red', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '1.2rem' }}
+                  >✕</button>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>🖊️</div>
+                  <div>Clique para anexar a assinatura (sem fundo)</div>
+                </div>
+              )}
+              <input
+                type="file"
+                ref={signatureInputRef}
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  if (e.target.files?.[0]) {
+                    setAssinatura(e.target.files[0]);
+                  }
+                  e.target.value = '';
+                }}
+              />
+            </div>
+          </div>
         </div>
 
         {/* Coluna Direita: Fotos */}
