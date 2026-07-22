@@ -2,20 +2,17 @@ import { useState, useRef, ChangeEvent, DragEvent } from 'react';
 import ExcelJS from 'exceljs';
 import './App.css';
 
-// TIPAGEM: Removemos a 'foto' da pessoa
 type Pessoa = {
   nome: string;
   cpf: string;
 };
 
 function App() {
-  // Estados atualizados (sem data e sem foto individual)
   const [pessoas, setPessoas] = useState<Pessoa[]>([{ nome: '', cpf: '' }]);
   const [sipra, setSipra] = useState('');
   const [endereco, setEndereco] = useState('São José do Capricho, em Flexeiras/AL');
   const [fotos, setFotos] = useState<File[]>([]);
 
-  // Estados de UI
   const [isGenerating, setIsGenerating] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -37,6 +34,23 @@ function App() {
     const novaLista = [...pessoas];
     novaLista[index] = { ...novaLista[index], [campo]: valor };
     setPessoas(novaLista);
+  };
+
+  // ================= MÁSCARA DE CPF =================
+  const formatarCPF = (cpf: string) => {
+    const cleaned = cpf.replace(/\D/g, '');
+    if (cleaned.length <= 3) return cleaned;
+    if (cleaned.length <= 6) return `${cleaned.slice(0, 3)}.${cleaned.slice(3)}`;
+    if (cleaned.length <= 9) return `${cleaned.slice(0, 3)}.${cleaned.slice(3, 6)}.${cleaned.slice(6)}`;
+    return `${cleaned.slice(0, 3)}.${cleaned.slice(3, 6)}.${cleaned.slice(6, 9)}-${cleaned.slice(9, 11)}`;
+  };
+
+  const handleCpfChange = (index: number, value: string) => {
+    // Permite apenas números e limita a 11 dígitos
+    const onlyNumbers = value.replace(/\D/g, '');
+    if (onlyNumbers.length <= 11) {
+      atualizarPessoa(index, 'cpf', onlyNumbers);
+    }
   };
 
   // ================= LÓGICA DE FOTOS =================
@@ -74,7 +88,7 @@ function App() {
       alert('Por favor, preencha Nome, CPF do Titular e o SIPRA.');
       return;
     }
-    setIsModalOpen(true); // Abre o modal de confirmação
+    setIsModalOpen(true);
   };
 
   const handleConfirmGeneration = () => {
@@ -94,18 +108,16 @@ function App() {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(buffer);
 
-      // ABA "0. Dados" (sem a data, pois o excel já tem =TODAY())
       const wsDados = workbook.getWorksheet('0. Dados');
       if (!wsDados) throw new Error('Aba "0. Dados" não encontrada.');
 
       wsDados.getCell('F7').value = endereco;
       wsDados.getCell('AA7').value = sipra;
       wsDados.getCell('D9').value = pessoas[0].nome;
-      wsDados.getCell('Z9').value = pessoas[0].cpf;
+      wsDados.getCell('Z9').value = pessoas[0].cpf; // Aqui vai puro: 00823096475
       wsDados.getCell('D11').value = pessoas[1]?.nome || '';
-      wsDados.getCell('Z11').value = pessoas[1]?.cpf || '';
+      wsDados.getCell('Z11').value = pessoas[1]?.cpf || ''; // Aqui vai puro
 
-      // ABA "4.Reg. Fotografico" (Grid 4x2)
       const wsFotos = workbook.getWorksheet('4.Reg. Fotografico');
       if (!wsFotos) throw new Error('Aba "4.Reg. Fotografico" não encontrada.');
 
@@ -131,20 +143,28 @@ function App() {
         });
       }
 
-      // GERAR E BAIXAR
       const outBuffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([outBuffer], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
       });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `planilha_${pessoas[0].nome}.xlsx`;
+
+      // ==========================================
+      // 🏷️ LÓGICA DE NOME DO ARQUIVO
+      // ==========================================
+      const currentYear = new Date().getFullYear();
+      let nomeBase = pessoas[0].nome.trim();
+
+      if (pessoas.length > 1 && pessoas[1].nome.trim() !== '') {
+        nomeBase += ` - ${pessoas[1].nome.trim()}`;
+      }
+
+      link.download = `${nomeBase}_${currentYear}.xlsx`;
       link.click();
 
-      // ================= SUCESSO E LIMPEZA =================
       setSuccessMessage('✅ Planilha gerada com sucesso!');
 
-      // Limpa o formulário e esconde a mensagem após 4 segundos
       setTimeout(() => {
         setPessoas([{ nome: '', cpf: '' }]);
         setSipra('');
@@ -177,7 +197,7 @@ function App() {
           <div className="modal-content">
             <h3>📋 Confirme os dados</h3>
             <p><strong>Nome:</strong> {pessoas[0].nome}</p>
-            <p><strong>CPF:</strong> {pessoas[0].cpf}</p>
+            <p><strong>CPF:</strong> {pessoas[0].cpf ? formatarCPF(pessoas[0].cpf) : ''}</p>
             {pessoas[1] && <p><strong>Cônjuge:</strong> {pessoas[1].nome}</p>}
             <p><strong>SIPRA:</strong> {sipra}</p>
             <p><strong>Endereço:</strong> {endereco}</p>
@@ -200,7 +220,6 @@ function App() {
       </header>
 
       <h1 className="page-title">Nova Planilha</h1>
-      <p className="page-subtitle">Preencha os dados para gerar a planilha do INCRA.</p>
 
       <div className="content-grid">
         {/* Coluna Esquerda: Dados */}
@@ -237,8 +256,9 @@ function App() {
                 <label>CPF</label>
                 <input
                   placeholder="000.000.000-00"
-                  value={pessoa.cpf}
-                  onChange={(e) => atualizarPessoa(index, 'cpf', e.target.value)}
+                  // Exibe o CPF com máscara, mas o estado guarda apenas números
+                  value={pessoa.cpf ? formatarCPF(pessoa.cpf) : ''}
+                  onChange={(e) => handleCpfChange(index, e.target.value)}
                 />
               </div>
             </div>
